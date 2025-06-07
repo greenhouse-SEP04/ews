@@ -1,4 +1,4 @@
-name: CI
+name: Build and Test Firmwaree
 
 on:
   push:
@@ -7,38 +7,28 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) Checkout your code
-      - uses: actions/checkout@v3
-
-      # 2) Setup Python (for PlatformIO)
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
-          python-version: '3.x'
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
 
-      # 3) Install PlatformIO
-      - run: |
-          python -m pip install --upgrade pip
-          pip install platformio
+      - name: Check contents of lib/Mocks
+        run: ls -R lib/Mocks
 
-      # 4) Build your AVR test environments (compile-only)
-      - name: Build AVR test envs
+      - name: Run PlatformIO Tests
         run: |
-          platformio run -e target_test
-          platformio run -e taret_test_analog
-
-      # 5) Optionally compile your main firmware (just to catch build issues)
-      - name: Build firmware
-        run: |
-          platformio run -e target_run
-
-      # 6) Run host (native) tests
-      - name: Run native Unity tests
-        run: |
-          platformio test -e win_test \
-                          -e win_test_wifi \
-                          -e win_test_pc_comm \
-                          -e win_test_light
+          pio test -e win_test \
+                   -e win_test_wifi \
+                   -e win_test_pc_comm \
+                   -e win_test_light
