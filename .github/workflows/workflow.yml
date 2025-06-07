@@ -1,0 +1,38 @@
+# GitHub Actions Workflow for Greenhouse-IoT
+name: Build and Test Firmwaree
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+
+      - name: Check contents of lib/Mocks
+        run: ls -R lib/Mocks
+
+      - name: Run PlatformIO Tests
+        run: |
+          pio test -e win_test \
+                  -e win_test_wifi \
+                  -e win_test_pc_comm \
+                  -e win_test_light \
+                  -e win_test_uart 
