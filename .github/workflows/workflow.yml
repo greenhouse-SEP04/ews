@@ -1,32 +1,44 @@
-name: Build and Test Firmwaree
+# .github/workflows/ci.yml
+name: Build and Test Firmware
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - dev
   pull_request:
-    branches: [ main ]
+    branches:
+      - dev
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # 1) Checkout your code
       - uses: actions/checkout@v4
+
+      # 2) Cache pip and PlatformIO downloads
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
+
+      # 3) Setup Python
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      # 4) Install PlatformIO
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
 
-      - name: Check contents of lib/Mocks
-        run: ls -R lib/Mocks
+      # 5) Compile AVR‐side tests (no hardware upload, just build)
+      - name: Build AVR tests
+        run: pio run -e target_test
 
-      - name: Run PlatformIO Tests
+      # 6) Run native (host) Unity tests
+      - name: Run native tests
         run: |
           pio test -e win_test \
                    -e win_test_wifi \
