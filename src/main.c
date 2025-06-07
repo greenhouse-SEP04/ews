@@ -1,7 +1,10 @@
 #include "wifi.h"
 #include "uart.h"
-#include <util/delay.h>
-#include <stdlib.h>
+#ifndef WINDOWS_TEST
+# include <util/delay.h>
+#else
+# include "util/delay.h"
+#endif#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <avr/interrupt.h>

@@ -1,8 +1,11 @@
 
 #include "unity.h"
 
-#include <util/delay.h>
-
+#ifndef WINDOWS_TEST
+# include <util/delay.h>
+#else
+# include "util/delay.h"
+#endif
 #include <avr/io.h>
 #include "adxl345.h"
 #include <stdint.h>

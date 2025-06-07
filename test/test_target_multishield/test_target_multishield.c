@@ -1,8 +1,11 @@
 
 #include "unity.h"
 #include "buttons.h"
-#include <util/delay.h>
-#include "pc_comm.h"
+#ifndef WINDOWS_TEST
+# include <util/delay.h>
+#else
+# include "util/delay.h"
+#endif#include "pc_comm.h"
 #include <avr/io.h>
 #include "buzzer.h"
 #include "display.h"
