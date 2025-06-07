@@ -1,13 +1,9 @@
-#ifndef INCLUDES_H
-#define INCLUDES_H
-
 #ifdef WINDOWS_TEST
-  #include "mock_avr_io.h"
-  #include "delay.h"         // picks up lib/Mocks/util/delay.h
+#include "mock_avr_io.h"
 #else
-  #include <avr/io.h>
-  #include <avr/interrupt.h>
-  #include <util/delay.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
 #endif
 
 #include <stddef.h>
@@ -15,5 +11,3 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-
-#endif // INCLUDES_H

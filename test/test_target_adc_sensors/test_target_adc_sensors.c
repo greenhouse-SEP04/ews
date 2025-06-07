@@ -1,10 +1,7 @@
 #include "unity.h"
 #include <avr/io.h>
-#ifndef WINDOWS_TEST
-# include <util/delay.h>
-#else
-# include "util/delay.h"
-#endif#include <stdio.h>
+#include <util/delay.h>
+#include <stdio.h>
 #include "PC_Comm.h"
 #include "light.h"
 #include "soil.h"
