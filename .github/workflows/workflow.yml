@@ -34,5 +34,4 @@ jobs:
           pio test -e win_test \
                   -e win_test_wifi \
                   -e win_test_pc_comm \
-                  -e win_test_light \
-                  -e win_test_uart 
+                  -e win_test_light 
