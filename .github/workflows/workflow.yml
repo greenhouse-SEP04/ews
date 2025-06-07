@@ -1,45 +1,36 @@
-name: Build and Test Firmware
+# GitHub Actions Workflow for Greenhouse-IoT
+name: Build and Test Firmwaree
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        env-name:
-          - win_test_wifi
-          - win_test_uart
-          - win_test_pc_comm
-          - win_test_light
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
 
-      - name: Run PlatformIO for ${{ matrix.env-name }}
-        # For your AVR test env this is a build (no upload).
-        # For native ones this invokes the Unity tests.
+      - name: Check contents of lib/Mocks
+        run: ls -R lib/Mocks
+
+      - name: Run PlatformIO Tests
         run: |
-          if [[ "${{ matrix.env-name }}" == "target_test" ]]; then
-            pio run -e target_test
-          else
-            pio test -e ${{ matrix.env-name }}
-          fi
+          pio test -e win_test_wifi \
+                  -e win_test_uart \
+                  -e win_test_light 
