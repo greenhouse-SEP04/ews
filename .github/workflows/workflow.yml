@@ -1,22 +1,26 @@
-# .github/workflows/ci.yml
 name: Build and Test Firmware
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env-name:
+          - target_test
+          - win_test
+          - win_test_wifi
+          - win_test_pc_comm
+          - win_test_light
+
     steps:
-      # 1) Checkout your code
       - uses: actions/checkout@v4
 
-      # 2) Cache pip and PlatformIO downloads
       - uses: actions/cache@v4
         with:
           path: |
@@ -24,23 +28,19 @@ jobs:
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
 
-      # 3) Setup Python
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 4) Install PlatformIO
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
 
-      # 5) Compile AVR‐side tests (no hardware upload, just build)
-      - name: Build AVR tests
-        run: pio run -e target_test
-
-      # 6) Run native (host) Unity tests
-      - name: Run native tests
+      - name: Run PlatformIO for ${{ matrix.env-name }}
+        # For your AVR test env this is a build (no upload).
+        # For native ones this invokes the Unity tests.
         run: |
-          pio test -e win_test \
-                   -e win_test_wifi \
-                   -e win_test_pc_comm \
-                   -e win_test_light
+          if [[ "${{ matrix.env-name }}" == "target_test" ]]; then
+            pio run -e target_test
+          else
+            pio test -e ${{ matrix.env-name }}
+          fi
