@@ -6,11 +6,12 @@
 
 #include "unity.h"
 #include "wifi.h"
-#ifndef WINDOWS_TEST
-# include <util/delay.h>
+#ifdef WINDOWS_TEST
+# include "delay.h"
 #else
-# include "util/delay.h"
-#endif#include <avr/io.h>
+# include <util/delay.h>
+#endif
+#include <avr/io.h>
 #include <string.h>
 #include <stdio.h>
 
