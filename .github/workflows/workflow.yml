@@ -12,9 +12,8 @@ jobs:
     strategy:
       matrix:
         env-name:
-          - target_test
-          - win_test
           - win_test_wifi
+          - win_test_uart
           - win_test_pc_comm
           - win_test_light
 
