@@ -7,8 +7,8 @@
 #include "../fff.h"
 
 // Fake delay function (for _delay_ms and _delay_us in AVR code)
-FAKE_VOID_FUNC(_delay_ms, unsigned int);
-FAKE_VOID_FUNC(_delay_us, unsigned int);
+FAKE_VOID_FUNC(_delay_ms, int);
+FAKE_VOID_FUNC(_delay_us, int);
 
 // Setup and teardown for Unity
 void setUp(void) {
