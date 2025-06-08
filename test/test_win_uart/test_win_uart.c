@@ -1,18 +1,18 @@
 #include "unity.h"
 #include "uart.h"
 #include "mock_avr_io.h"
+#define FFF_GLOBALS
 #include "../fff.h"
 
-DEFINE_FFF_GLOBALS
 FAKE_VOID_FUNC(sei);
 FAKE_VOID_FUNC(cli);
 
 void setUp(void) {
-  // set stuff up here
+  
 }
 
 void tearDown(void) {
-  // clean stuff up here
+  
 }
 
 void test_uart_init0(){

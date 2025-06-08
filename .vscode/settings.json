@@ -1,6 +1,24 @@
 {
     "files.associations": {
         "interrupt.h": "c",
-        "io.h": "c"
+        "dht11.h": "c",
+        "stdlib.h": "c",
+        "time.h": "c",
+        "string.h": "c",
+        "stdbool.h": "c",
+        "leds.h": "c",
+        "light.h": "c",
+        "stdint.h": "c",
+        "wifi.h": "c",
+        "stdio.h": "c",
+        "delay.h": "c",
+        "timestamp.h": "c",
+        "fertilizer.h": "c",
+        "notification.h": "c",
+        "lightbulb.h": "c",
+        "periodic_task.h": "c",
+        "uart_packet.h": "c",
+        "uart_buffer.h": "c",
+        "includes.h": "c"
     }
 }

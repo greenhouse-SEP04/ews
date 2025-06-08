@@ -1,10 +1,16 @@
+
+
 #include <servo.h>
 #include "includes.h"
 
+#ifdef __AVR__
+#include <avr/io.h>
 
 #define DDR_SERVO DDRE
 #define P_SERVO PE3
 #define PORT_SERVO PORTE
+
+#include <util/delay.h>
 
 void servo(uint8_t angle)
 {
@@ -51,3 +57,5 @@ void servo(uint8_t angle)
    TCCR2A =TCCR2A_state ; //finished borrowing timer2. 
    TCCR2B =TCCR2B_state ; //
 }
+
+#endif

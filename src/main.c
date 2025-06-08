@@ -1,10 +1,30 @@
-#include "wifi.h"
-#include "uart.h"
 #include <util/delay.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <avr/interrupt.h>
+
+#include "uart.h"
+#include "uart_packet.h"
+#include "uart_buffer.h"
+
+#include "wifi.h"
+#include "light.h"
+#include "display.h"
+#include "periodic_task.h"
+#include "light.h"
+#include "leds.h"
+#include "lightbulb.h"
+#include "dht11.h"
+#include "soil.h"
+#include "pump.h"
+#include "preset.h"
+#include "fertilizer.h"
+#include "actions.h"
+
+#include "timestamp.h"
+#include "clock.h"
 
 #define MAX_STRING_LENGTH 100
 
