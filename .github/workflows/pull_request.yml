@@ -35,4 +35,5 @@ jobs:
                   -e win_test_uart \
                   -e win_test_clock \
                   -e win_test_light \
-                  -e win_test_timestamp 
+                  -e win_test_timestamp \
+                  -e win_test_servo
