@@ -1,17 +1,22 @@
-# GitHub Actions Workflow for Greenhouse-IoT
-name: Build and Test Firmwaree
+name: Build and Test Firmware
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env:
+          - win_test_wifi
+          - win_test_uart
+          - win_test_clock
+          - win_test_light
+          - win_test_timestamp
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
@@ -29,11 +34,5 @@ jobs:
       - name: Check contents of lib/Mocks
         run: ls -R lib/Mocks
 
-      - name: Run PlatformIO Tests
-        run: |
-          pio test -e win_test_wifi \
-                  -e win_test_uart \
-                  -e win_test_clock \
-                  -e win_test_light \
-                  -e win_test_timestamp \
-                  -e win_test_servo
+      - name: Run PlatformIO Test for ${{ matrix.env }}
+        run: pio test -e ${{ matrix.env }}
