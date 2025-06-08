@@ -4,10 +4,10 @@ name: Build and Test Firmwaree
 on:
   push:
     branches:
-      - dev
+      - main
   pull_request:
     branches:
-      - dev
+      - main
 
 jobs:
   build:
@@ -33,9 +33,6 @@ jobs:
         run: |
           pio test -e win_test_wifi \
                   -e win_test_uart \
-                  -e win_test_actions \
-                  -e win_test_fertilizer \
                   -e win_test_clock \
                   -e win_test_light \
-                  -e win_test_timestamp \
-                  -e win_test_preset 
+                  -e win_test_timestamp 

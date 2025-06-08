@@ -13,7 +13,6 @@
         "stdio.h": "c",
         "delay.h": "c",
         "timestamp.h": "c",
-        "fertilizer.h": "c",
         "notification.h": "c",
         "lightbulb.h": "c",
         "periodic_task.h": "c",

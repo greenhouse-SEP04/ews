@@ -15,13 +15,9 @@
 #include "periodic_task.h"
 #include "light.h"
 #include "leds.h"
-#include "lightbulb.h"
 #include "dht11.h"
 #include "soil.h"
 #include "pump.h"
-#include "preset.h"
-#include "fertilizer.h"
-#include "actions.h"
 
 #include "timestamp.h"
 #include "clock.h"
