@@ -17,6 +17,12 @@ jobs:
           - win_test_clock
           - win_test_light
           - win_test_timestamp
+          - win_test_buttons
+          - win_test_adxl345
+          - win_test_buzzer
+          - win_test_hcsr04
+          - win_test_pir
+          - win_test_pc_comm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
@@ -30,9 +36,5 @@ jobs:
           python-version: '3.11'
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
-
-      - name: Check contents of lib/Mocks
-        run: ls -R lib/Mocks
-
-      - name: Run PlatformIO Test for ${{ matrix.env }}
+      - name: Run PlatformIO tests (${{ matrix.env }})
         run: pio test -e ${{ matrix.env }}
