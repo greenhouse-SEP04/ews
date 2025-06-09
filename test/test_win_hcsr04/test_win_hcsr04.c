@@ -1,6 +1,6 @@
 #include "unity.h"
 #include "hc_sr04.h"
-#include <avr/io.h>
+#include "mock_avr_io.h"
 
 void _delay_us(unsigned long us) { (void)us; }
 

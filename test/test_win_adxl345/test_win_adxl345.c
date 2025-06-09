@@ -1,6 +1,6 @@
 #include "unity.h"
 #include "adxl345.h"
-#include <avr/io.h>
+#include "mock_avr_io.h"
 
 /* ---------- FFF-style spy ------------------------------------------------ */
 static uint8_t spi_buffer[16];

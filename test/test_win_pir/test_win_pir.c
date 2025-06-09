@@ -1,6 +1,6 @@
 #include "unity.h"
 #include "pir.h"
-#include <avr/io.h>
+#include "mock_avr_io.h"
 
 static volatile uint8_t callback_hits;
 

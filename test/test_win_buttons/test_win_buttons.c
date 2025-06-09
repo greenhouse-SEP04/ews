@@ -1,6 +1,6 @@
 #include "unity.h"
 #include "buttons.h"
-#include <avr/io.h>
+#include "mock_avr_io.h"
 
 /* Unity fixture ---------------------------------------------------------- */
 void setUp(void)

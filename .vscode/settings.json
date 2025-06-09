@@ -18,6 +18,7 @@
         "periodic_task.h": "c",
         "uart_packet.h": "c",
         "uart_buffer.h": "c",
-        "includes.h": "c"
+        "includes.h": "c",
+        "mock_avr_io.h": "c"
     }
 }
