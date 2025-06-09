@@ -11,8 +11,6 @@
 #pragma once
 #include <stdint.h>
 #include "uart.h"
-#include "includes.h"
-
 
 /**
  * @brief Define which USART module is used for WiFi communication.
@@ -68,13 +66,6 @@ WIFI_ERROR_MESSAGE_t wifi_command_join_AP(char *ssid, char *password);
 WIFI_ERROR_MESSAGE_t wifi_command_disable_echo();
 
 /**
- * @brief Enable echo from the WiFi module.
- * 
- * @return WIFI_ERROR_MESSAGE_t Error message based on the response from the module.
- */
-WIFI_ERROR_MESSAGE_t wifi_command_enable_echo();
-
-/**
  * @brief Set the WiFi module to mode 1.
  * 
  * @return WIFI_ERROR_MESSAGE_t Error message based on the response from the module.
@@ -105,9 +96,7 @@ WIFI_ERROR_MESSAGE_t wifi_command_get_ip_from_URL(char * url, char *ip_address);
  * @param received_message_buffer Buffer to hold the received message.
  * @return WIFI_ERROR_MESSAGE_t Error message based on the response from the module.
  */
-WIFI_ERROR_MESSAGE_t wifi_command_create_TCP_connection(char *IP, uint16_t port, WIFI_TCP_Callback_t callback_when_message_received, char *received_message_buffer, int *received_message_length );
-
-void wifi_enqueue_data_packet(uint8_t *data, uint16_t length);
+WIFI_ERROR_MESSAGE_t wifi_command_create_TCP_connection(char *IP, uint16_t port, WIFI_TCP_Callback_t callback_when_message_received, char *received_message_buffer);
 
 /**
  * @brief Transmit data over an established TCP connection.
@@ -130,14 +119,3 @@ WIFI_ERROR_MESSAGE_t wifi_command_quit_AP();
  * @return WIFI_ERROR_MESSAGE_t Error message based on the response from the module.
  */
 WIFI_ERROR_MESSAGE_t wifi_command_close_TCP_connection();
-
-
-
-/**
- *  NEW NEW NEW NEW 
- * @brief Get the MAC address of the ESP8266 module.
- * 
- * @param mac_buffer A pointer to a buffer of at least 18 bytes (to store the MAC string).
- * @return WIFI_ERROR_MESSAGE_t Result of the operation.
- */
-WIFI_ERROR_MESSAGE_t wifi_command_get_MAC(char *mac_buffer);
