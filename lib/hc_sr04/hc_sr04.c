@@ -12,7 +12,7 @@
 /* ------- mocked I/O registers --------------------------------------- */
 uint8_t  DDRL,  PORTL,  PINL;
 uint8_t  TCCR1B;                 /* Timer-1 control register            */
-uint16_t TCNT1;                  /* 16-bit software “counter”           */
+uint8_t TCNT1;                  /* 8-bit software “counter”           */
 
 /* ------- delay stubs ------------------------------------------------ */
 void _delay_us(int us) { (void)us; }
