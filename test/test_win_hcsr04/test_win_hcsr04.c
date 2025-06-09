@@ -1,48 +1,109 @@
+/*  test_win_hcsr04.c – desktop unit-tests for lib/hc_sr04                   */
 #include "unity.h"
-#include "hc_sr04.h"
-#include "mock_avr_io.h"
+#include "../fff.h"
 
-/*  The delay stubs are now supplied by hc_sr04.c for the Windows build,
- *  so we no longer define _delay_us here.                                   */
+#include "hc_sr04.h"          /* unit under test                             */
+#include "mock_avr_io.h"      /* AVR-register names / externs                */
 
-/*-----------------------------------------------------------------------*/
+#include <pthread.h>
+#include <stdint.h>
+#include <string.h>
+
+/* -------------------------------------------------------------------------- */
+/*                         FFF fake-function definitions                      */
+DEFINE_FFF_GLOBALS;
+
+FAKE_VOID_FUNC(sei);
+FAKE_VOID_FUNC(cli);
+FAKE_VOID_FUNC(_delay_us, int);
+
+/* -------------------------------------------------------------------------- */
+/*        Materialise the AVR registers this driver touches for the host      */
+uint8_t DDRC, DDRL, PORTL, PINL, TCCR1B;
+uint16_t TCNT1;
+
+/* -------------------------------------------------------------------------- */
+/*              Custom _delay_us fake – drives the simulated echo             */
+static int delay_call_cnt;
+
+/*  After the 2nd call (right at the end of the 10 µs trigger pulse) we       *
+ *  raise Echo HIGH and spin a background thread that – a few CPU cycles      *
+ *  later – drops Echo LOW again and presets TCNT1 to a deterministic value.  */
+static void *echo_low_thread(void *arg)
+{
+    (void)arg;
+
+    /* brief busy-spin so the SUT enters its “while(Echo HIGH)” loop          */
+    volatile int junk = 0;
+    for (int i = 0; i < 2000; i++) junk++;
+
+    TCNT1 = 400;                        /* measured timer counts              */
+    PINL  &= ~(1 << PL6);               /* Echo goes LOW – pulse ends         */
+    return NULL;
+}
+
+static void _delay_us_stub(int us)
+{
+    (void)us;
+    delay_call_cnt++;
+
+    if (delay_call_cnt == 2)            /* trigger pulse just finished        */
+    {
+        PINL |= (1 << PL6);             /* Echo rises so first wait ends      */
+
+        pthread_t tid;
+        pthread_create(&tid, NULL, echo_low_thread, NULL);
+        pthread_detach(tid);            /* no join required                   */
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Unity hooks                                  */
 void setUp(void)
 {
-    /* Minimal reset of the mocked registers                                */
-    TCCR1B = 0;
-    TCNT1  = 0;
-    PINL   = 0;
+    /* Clear fake registers and counters                                      */
+    memset(&DDRC, 0, sizeof DDRC);      /* DDRC .. is contiguous globals      */
+    DDRL = PORTL = PINL = TCCR1B = 0;
+    TCNT1 = 0;
+    delay_call_cnt = 0;
+
+    _delay_us_fake.custom_fake = _delay_us_stub;
 }
 
 void tearDown(void) {}
 
-/*-----------------------------------------------------------------------*/
-void test_timeout_returns_zero(void)
+/* -------------------------------------------------------------------------- */
+/*                               Test cases                                   */
+
+void test_init_sets_trigger_pin_output(void)
 {
-    /* Echo never goes high; force timer near the overflow threshold        */
-    TCNT1 = (F_CPU / 256) * 0.12;   /* >0.1 s                               */
-    TEST_ASSERT_EQUAL_UINT16(0, hc_sr04_takeMeasurement());
+    DDRL = 0x00;
+    hc_sr04_init();
+    TEST_ASSERT_BITS_HIGH((1 << PL7), DDRL);   /* Trigger pin now output      */
 }
 
-/*-----------------------------------------------------------------------*/
-void test_distance_math_10cm(void)
+void test_takeMeasurement_returns_expected_distance(void)
 {
-    /* For 10 cm round-trip the tick count ≈ 4 (see driver comment)         */
-    const uint16_t fake_cnt = 4U;
+    PORTL &= ~(1 << PL7);                       /* make sure Trigger LOW      */
 
-    TCNT1 = fake_cnt;
-    PINL  |=  (1 << PL6);   /* echo high -> measurement loop begins        */
-    PINL  &= ~(1 << PL6);   /* immediately low so counting stops           */
+    uint16_t dist = hc_sr04_takeMeasurement();
 
-    uint16_t cm = hc_sr04_takeMeasurement();
-    TEST_ASSERT_INT_WITHIN(1, 10, cm);   /* accept ±1 cm                    */
+    /* 1) Trigger pin back LOW and both 10 µs delays executed                 */
+    TEST_ASSERT_BITS_LOW((1 << PL7), PORTL);
+    TEST_ASSERT_EQUAL(2, _delay_us_fake.call_count);
+
+    /* 2) We forced TCNT1 = 400 → distance = 400 × 343 / 125 = 1097 cm        */
+    TEST_ASSERT_EQUAL_UINT16(1097, dist);
 }
 
-/*-----------------------------------------------------------------------*/
+/* -------------------------------------------------------------------------- */
+/*                                   Runner                                   */
 int main(void)
 {
     UNITY_BEGIN();
-    RUN_TEST(test_timeout_returns_zero);
-    RUN_TEST(test_distance_math_10cm);
+
+    RUN_TEST(test_init_sets_trigger_pin_output);
+    RUN_TEST(test_takeMeasurement_returns_expected_distance);
+
     return UNITY_END();
 }

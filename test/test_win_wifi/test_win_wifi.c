@@ -1,20 +1,26 @@
+/*  test_win_wifi.c – unit tests for lib/wifi (desktop build with FFF/Unity) */
 #include "unity.h"
 #include "../fff.h"
 
 #include "wifi.h"
 #include "uart.h"
+
 #include <stdio.h>
 #include <string.h>     /* strlen */
+
+/* -------------------------------------------------------------------------- */
+/*                       FFF fake-function declarations                       */
+
+DEFINE_FFF_GLOBALS;
 
 FAKE_VOID_FUNC(sei);
 FAKE_VOID_FUNC(cli);
 FAKE_VOID_FUNC(_delay_ms, int);
 
-FAKE_VOID_FUNC(uart_send_string_blocking, USART_t, char *);
-FAKE_VOID_FUNC(uart_init, USART_t, uint32_t, UART_Callback_t);
-FAKE_VOID_FUNC(uart_send_array_blocking, USART_t, uint8_t *, uint16_t);
+FAKE_VOID_FUNC(uart_send_string_blocking,   USART_t, char *);
+FAKE_VOID_FUNC(uart_init,                   USART_t, uint32_t, UART_Callback_t);
+FAKE_VOID_FUNC(uart_send_array_blocking,    USART_t, uint8_t *, uint16_t);
 FAKE_VALUE_FUNC(UART_Callback_t, uart_get_rx_callback, USART_t);
-FAKE_VOID_FUNC(uart_send_array_nonBlocking, USART_t, uint8_t *, uint16_t);
 
 uint8_t TEST_BUFFER[128];
 void TCP_Received_callback_func();
@@ -24,7 +30,11 @@ FAKE_VOID_FUNC(TCP_Received_callback_func);
 void setUp(void)
 {
     wifi_init();
+
     RESET_FAKE(uart_init);
+    RESET_FAKE(uart_send_string_blocking);
+    RESET_FAKE(uart_send_array_blocking);
+    RESET_FAKE(uart_get_rx_callback);
     RESET_FAKE(TCP_Received_callback_func);
 }
 
@@ -33,10 +43,10 @@ void tearDown(void) {}
 /* Helpers ------------------------------------------------------------------ */
 static void fake_wifiModule_send(char *cArray, int length)
 {
-    wifi_command_AT();
-    UART_Callback_t cb = uart_init_fake.arg2_history[0];   /* save first cb */
+    wifi_command_AT();                                 /* arm driver          */
+    UART_Callback_t cb = uart_init_fake.arg2_history[0];/* capture first CB    */
     for (int i = 0; i < length; i++)
-        cb((uint8_t)cArray[i]);
+        cb((uint8_t)cArray[i]);                        /* feed bytes          */
 }
 
 static void string_send_from_TCP_server(char *cArray)
@@ -67,7 +77,9 @@ static void array_send_from_TCP_server(char *cArray, int length)
         cb((uint8_t)cArray[i]);
 }
 
-/* Unit tests ----------------------------------------------------------------*/
+/* -------------------------------------------------------------------------- */
+/*                               Unit tests                                   */
+
 void test_wifi_default_callback_func_is_null(void)
 {
     TEST_ASSERT_EQUAL(NULL, uart_init_fake.arg2_val);
@@ -78,8 +90,7 @@ void test_wifi_command_AT_sends_correct_stuff_to_uart(void)
     wifi_init();
     uart_get_rx_callback_fake.return_val = uart_init_fake.arg2_val;
 
-    WIFI_ERROR_MESSAGE_t err = wifi_command_AT();
-    (void)err;          /* silence “set but not used” if optimised */
+    (void)wifi_command_AT();   /* we only care about what was sent            */
 
     TEST_ASSERT_EQUAL(USART_2, uart_send_string_blocking_fake.arg0_val);
     TEST_ASSERT_EQUAL(1,        uart_send_string_blocking_fake.call_count);
@@ -186,7 +197,7 @@ void test_wifi_TCP_callback_not_yet_called_for_incomplete_message(void)
 
     TEST_ASSERT_EQUAL(0, TCP_Received_callback_func_fake.call_count);
 
-    cb('a');    /* deliver last byte */
+    cb('a');                        /* deliver last byte                     */
     TEST_ASSERT_EQUAL(1, TCP_Received_callback_func_fake.call_count);
 }
 
@@ -211,21 +222,30 @@ void test_wifi_zeroes_in_data(void)
 void test_wifi_send(void)
 {
     fake_wifiModule_send("OK\r\n", 5);
-    TEST_ASSERT_EQUAL(WIFI_OK, wifi_command_TCP_transmit((uint8_t *)"sendThis", 8));
+
+    TEST_ASSERT_EQUAL(WIFI_OK,
+                      wifi_command_TCP_transmit((uint8_t *)"sendThis", 8));
+
     TEST_ASSERT_EQUAL_STRING("AT+CIPSEND=8\r\n",
                              uart_send_string_blocking_fake.arg1_val);
-    TEST_ASSERT_EQUAL_STRING("sendThis", uart_send_array_nonBlocking_fake.arg1_val);
+
+    TEST_ASSERT_EQUAL_STRING("sendThis",
+                             (char *)uart_send_array_blocking_fake.arg1_val);
 }
 
 void test_wifi_send_data_with_zero(void)
 {
     fake_wifiModule_send("OK\r\n", 5);
+
     const char *msg = "sendTh\0s!A!";
-    TEST_ASSERT_EQUAL(WIFI_OK, wifi_command_TCP_transmit((uint8_t *)msg, 11));
+    TEST_ASSERT_EQUAL(WIFI_OK,
+                      wifi_command_TCP_transmit((uint8_t *)msg, 11));
+
     TEST_ASSERT_EQUAL_STRING("AT+CIPSEND=11\r\n",
                              uart_send_string_blocking_fake.arg1_val);
+
     TEST_ASSERT_EQUAL_INT8_ARRAY(msg,
-                                 uart_send_array_nonBlocking_fake.arg1_val, 11);
+                                 uart_send_array_blocking_fake.arg1_val, 11);
 }
 
 /* ---- Quit AP ------------------------------------------------------------- */
@@ -237,7 +257,9 @@ void test_wifi_quit_AP(void)
                              uart_send_string_blocking_fake.arg1_val);
 }
 
-/* Runner ------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                 Runner                                     */
+
 int main(void)
 {
     UNITY_BEGIN();
