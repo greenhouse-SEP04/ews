@@ -2,9 +2,12 @@
 #include "pc_comm.h"
 #include "fff.h"
 
-DEFINE_FFF_GLOBALS;
+/* NOTE: DEFINE_FFF_GLOBALS is *already* provided once in test_fff_globals.c.
+ * Do **not** repeat it here – repeating would create multiple-definition
+ * linker errors.
+ */
 
-/* ---- correct prototypes ------------------------------------------------- */
+/* ---------- fake the underlying UART layer ------------------------------ */
 FAKE_VOID_FUNC(uart_init,                 USART_t, uint32_t, UART_Callback_t);
 FAKE_VOID_FUNC(uart_send_array_blocking,  USART_t, uint8_t*, uint16_t);
 FAKE_VOID_FUNC(uart_send_string_blocking, USART_t, char*);
@@ -19,14 +22,16 @@ void setUp(void)
     RESET_FAKE(uart_send_array_nonBlocking);
 }
 
-void tearDown(void){}
+void tearDown(void) {}
 
-static void dummy_cb(char c){ (void)c; }
+static void dummy_cb(char c) { (void)c; }
 
+/* ------------------------------------------------------------------------ */
 void test_init_passes_args(void)
 {
     pc_comm_init(115200, dummy_cb);
-    TEST_ASSERT_EQUAL_UINT(1, uart_init_fake.call_count);
+
+    TEST_ASSERT_EQUAL(1, uart_init_fake.call_count);
     TEST_ASSERT_EQUAL(USART_PC_COMM, uart_init_fake.arg0_val);
     TEST_ASSERT_EQUAL(115200,        uart_init_fake.arg1_val);
     TEST_ASSERT_EQUAL_PTR(dummy_cb,  uart_init_fake.arg2_val);
@@ -34,19 +39,21 @@ void test_init_passes_args(void)
 
 void test_blocking_send_delegates(void)
 {
-    uint8_t data[4] = {1,2,3,4};
+    uint8_t data[4] = {1, 2, 3, 4};
+
     pc_comm_send_array_blocking(data, 4);
-    TEST_ASSERT_EQUAL_UINT(1, uart_send_array_blocking_fake.call_count);
+    TEST_ASSERT_EQUAL(1, uart_send_array_blocking_fake.call_count);
 
     pc_comm_send_string_blocking("OK");
-    TEST_ASSERT_EQUAL_UINT(1, uart_send_string_blocking_fake.call_count);
+    TEST_ASSERT_EQUAL(1, uart_send_string_blocking_fake.call_count);
 }
 
 void test_nonblocking_send_delegates(void)
 {
-    uint8_t d[2] = {9,9};
+    uint8_t d[2] = {9, 9};
+
     pc_comm_send_array_nonBlocking(d, 2);
-    TEST_ASSERT_EQUAL_UINT(1, uart_send_array_nonBlocking_fake.call_count);
+    TEST_ASSERT_EQUAL(1, uart_send_array_nonBlocking_fake.call_count);
 }
 
 /* ------------------------------------------------------------------------ */
