@@ -2,7 +2,7 @@
 #include "hc_sr04.h"
 #include "mock_avr_io.h"
 
-void _delay_us(unsigned long us) { (void)us; }
+void _delay_us(int us) { (void)us; }
 
 /*-----------------------------------------------------------------------*/
 void setUp(void)
