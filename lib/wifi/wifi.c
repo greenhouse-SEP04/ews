@@ -1,121 +1,316 @@
-/*  test_win_wifi.c – unit tests for lib/wifi (desktop build with FFF/Unity) */
-#include "unity.h"
-#include "../fff.h"          /* <-- include only, NO DEFINE_FFF_GLOBALS here */
-
 #include "wifi.h"
+#include "includes.h"
+
+
 #include "uart.h"
+#define WIFI_DATABUFFERSIZE 128
+static uint8_t wifi_dataBuffer[WIFI_DATABUFFERSIZE];
+static uint8_t wifi_dataBufferIndex;
+static uint32_t wifi_baudrate;
 
-#include <stdio.h>
-#include <string.h>     /* strlen */
 
-/* -------------------------------------------------------------------------- */
-/*                       FFF fake-function declarations                       */
 
-FAKE_VOID_FUNC(sei);
-FAKE_VOID_FUNC(cli);
-FAKE_VOID_FUNC(_delay_ms, int);
 
-FAKE_VOID_FUNC(uart_send_string_blocking,   USART_t, char *);
-FAKE_VOID_FUNC(uart_init,                   USART_t, uint32_t, UART_Callback_t);
-FAKE_VOID_FUNC(uart_send_array_blocking,    USART_t, uint8_t *, uint16_t);
-FAKE_VALUE_FUNC(UART_Callback_t, uart_get_rx_callback, USART_t);
-
-/* -------------------------------------------------------------------------- */
-/*                            Test-local objects                              */
-
-uint8_t TEST_BUFFER[128];
-
-void TCP_Received_callback_func();
-FAKE_VOID_FUNC(TCP_Received_callback_func);
-
-/* -------------------------------------------------------------------------- */
-void setUp(void)
+void wifi_init()
 {
-    wifi_init();
-
-    RESET_FAKE(uart_init);
-    RESET_FAKE(uart_send_string_blocking);
-    RESET_FAKE(uart_send_array_blocking);
-    RESET_FAKE(uart_get_rx_callback);
-    RESET_FAKE(TCP_Received_callback_func);
+    wifi_baudrate = 115200;
+    uart_init(USART_WIFI, wifi_baudrate, NULL);
 }
 
-void tearDown(void) {}
-
-/* Helpers ------------------------------------------------------------------ */
-static void fake_wifiModule_send(char *cArray, int length)
+/*
+void wifi_transmit(uint8_t *data, uint8_t length)
 {
-    wifi_command_AT();                              /* arm driver            */
-    UART_Callback_t cb = uart_init_fake.arg2_history[0];
-    for (int i = 0; i < length; i++)
-        cb((uint8_t)cArray[i]);                     /* feed bytes            */
+    uart_send_array_blocking(USART_WIFI, data, length);
+}*/
+
+void static wifi_clear_databuffer_and_index()
+{
+    for (uint16_t i = 0; i < WIFI_DATABUFFERSIZE; i++)
+        wifi_dataBuffer[i] = 0;
+    wifi_dataBufferIndex = 0;
 }
 
-static void string_send_from_TCP_server(char *cArray)
+void static wifi_command_callback(uint8_t received_byte)
 {
-    fake_wifiModule_send("OK\r\n", 5);
-    TEST_ASSERT_EQUAL(
-        WIFI_OK,
-        wifi_command_create_TCP_connection(
-            "The IP adress", 8000,
-            TCP_Received_callback_func, TEST_BUFFER));
+    wifi_dataBuffer[wifi_dataBufferIndex] = received_byte;
+    wifi_dataBufferIndex++;
+}
+WIFI_ERROR_MESSAGE_t wifi_command(const char *str, uint16_t timeOut_s)
+{
+    UART_Callback_t callback_state = uart_get_rx_callback(USART_WIFI);
+    uart_init(USART_WIFI, wifi_baudrate, wifi_command_callback);
 
-    UART_Callback_t cb = uart_init_fake.arg2_val;
-    for (size_t i = 0; i < strlen(cArray); i++)
-        cb((uint8_t)cArray[i]);
+    char sendbuffer[128];
+    strcpy(sendbuffer, str);
+
+    uart_send_string_blocking(USART_WIFI, strcat(sendbuffer, "\r\n"));
+
+    // better wait sequence...
+    for (uint16_t i = 0; i < timeOut_s * 100UL; i++) // timeout after 20 sec
+    {
+        _delay_ms(10);
+        if (strstr((char *)wifi_dataBuffer, "OK\r\n") != NULL)
+            break;
+    }
+
+    WIFI_ERROR_MESSAGE_t error;
+
+    if (wifi_dataBufferIndex == 0)
+        error=WIFI_ERROR_NOT_RECEIVING;
+    else if (strstr((char *)wifi_dataBuffer, "OK") != NULL)
+        error=WIFI_OK;
+    else if (strstr((char *)wifi_dataBuffer, "ERROR") != NULL)
+        error= WIFI_ERROR_RECEIVED_ERROR;
+    else if (strstr((char *)wifi_dataBuffer, "FAIL") != NULL)
+        error= WIFI_FAIL;
+    else
+        error= WIFI_ERROR_RECEIVING_GARBAGE;
+    
+    wifi_clear_databuffer_and_index();
+    uart_init(USART_WIFI, wifi_baudrate, callback_state);
+    return error; 
+
+
+
 }
 
-static void array_send_from_TCP_server(char *cArray, int length)
+WIFI_ERROR_MESSAGE_t wifi_command_AT()
 {
-    fake_wifiModule_send("OK\r\n", 5);
-    TEST_ASSERT_EQUAL(
-        WIFI_OK,
-        wifi_command_create_TCP_connection(
-            "The IP adress", 8000,
-            TCP_Received_callback_func, TEST_BUFFER));
-
-    UART_Callback_t cb = uart_init_fake.arg2_val;
-    for (int i = 0; i < length; i++)
-        cb((uint8_t)cArray[i]);
+    return wifi_command("AT", 1);
 }
 
-/* -------------------------------------------------------------------------- */
-/*                               Unit tests                                   */
-/*  … (all tests remain exactly as before) …                                  */
-/* -------------------------------------------------------------------------- */
-
-int main(void)
+WIFI_ERROR_MESSAGE_t wifi_command_join_AP(char *ssid, char *password)
 {
-    UNITY_BEGIN();
+   /* WIFI_ERROR_MESSAGE_t error = wifi_command_AT();
+    if (error != WIFI_OK)
+        return error;*/
 
-    /* ---- public-API tests ------------------------------------------------ */
-    RUN_TEST(test_wifi_default_callback_func_is_null);
-    RUN_TEST(test_wifi_command_AT_sends_correct_stuff_to_uart);
-    RUN_TEST(test_wifi_command_AT_error_code_is_ok_when_receiving_OK_from_hardware);
-    RUN_TEST(test_wifi_command_AT_error_code_is_WIFI_ERROR_RECEIVED_ERROR_when_receiving_nothing);
-    RUN_TEST(test_wifi_command_AT_error_code_is_WIFI_ERROR_RECEIVED_ERROR_when_receiving_ERROR);
-    RUN_TEST(test_wifi_command_AT_error_code_is_WIFI_ERROR_GARBAGE_when_receiving_garbage);
+    char sendbuffer[128];
+    strcpy(sendbuffer, "AT+CWJAP=\"");
+    strcat(sendbuffer, ssid);
+    strcat(sendbuffer, "\",\"");
+    strcat(sendbuffer, password);
+    strcat(sendbuffer, "\"");
 
-    RUN_TEST(test_wifi_join_AP_OK);
-    RUN_TEST(test_wifi_join_AP_FAIL_wrong_ssid_or_password);
+    return wifi_command(sendbuffer, 20);
+}
 
-    RUN_TEST(test_wifi_TCP_connection_OK);
-    RUN_TEST(test_wifi_TCP_connection_failed);
+WIFI_ERROR_MESSAGE_t wifi_command_disable_echo()
+{
+    return wifi_command("ATE0", 1);
+}
 
-    /* ---- incoming-data parser ------------------------------------------- */
-    RUN_TEST(test_wifi_can_receive);
-    RUN_TEST(test_wifi_TCP_receives_after_garbage);
-    RUN_TEST(test_wifi_TCP_callback_invoked_when_message_complete);
-    RUN_TEST(test_wifi_TCP_callback_not_yet_called_for_incomplete_message);
-    RUN_TEST(test_wifi_TCP_robust_against_prefix_fragment_beforehand);
-    RUN_TEST(test_wifi_zeroes_in_data);
+WIFI_ERROR_MESSAGE_t wifi_command_get_ip_from_URL(char * url, char *ip_address){
+    char sendbuffer[128];
+    strcpy(sendbuffer, "AT+CIPDOMAIN=\"");
+    strcat(sendbuffer, url);
+    strcat(sendbuffer, "\"");
+    
+    uint16_t timeOut_s = 5;
 
-    /* ---- outgoing-data helper ------------------------------------------- */
-    RUN_TEST(test_wifi_send);
-    RUN_TEST(test_wifi_send_data_with_zero);
 
-    /* ---- misc ----------------------------------------------------------- */
-    RUN_TEST(test_wifi_quit_AP);
+     UART_Callback_t callback_state = uart_get_rx_callback(USART_WIFI);
+    uart_init(USART_WIFI, wifi_baudrate, wifi_command_callback);
 
-    return UNITY_END();
+    uart_send_string_blocking(USART_WIFI, strcat(sendbuffer, "\r\n"));
+
+    // better wait sequence...
+    for (uint16_t i = 0; i < timeOut_s * 100UL; i++) // timeout after 20 sec
+    {
+        _delay_ms(10);
+        if (strstr((char *)wifi_dataBuffer, "OK\r\n") != NULL)
+            break;
+    }
+
+    WIFI_ERROR_MESSAGE_t error;
+
+    if (wifi_dataBufferIndex == 0)
+        error=WIFI_ERROR_NOT_RECEIVING;
+    else if (strstr((char *)wifi_dataBuffer, "OK") != NULL)
+        error=WIFI_OK;
+    else if (strstr((char *)wifi_dataBuffer, "ERROR") != NULL)
+        error= WIFI_ERROR_RECEIVED_ERROR;
+    else if (strstr((char *)wifi_dataBuffer, "FAIL") != NULL)
+        error= WIFI_FAIL;
+    else
+        error= WIFI_ERROR_RECEIVING_GARBAGE;
+    
+   
+
+
+
+
+
+    char *ipStart = strstr((char *)wifi_dataBuffer, "CIPDOMAIN:");
+    if (ipStart != NULL) {
+        // Move the pointer to the start of the IP address
+        ipStart += strlen("CIPDOMAIN:");
+
+        // Find the end of the IP address (assuming it ends with a newline)
+        char * ipEnd = strchr(ipStart, '\r');
+        if (ipEnd != NULL && (ipEnd - ipStart) < 16) {
+            // Copy the IP address into the buffer
+            strncpy(ip_address, ipStart, ipEnd - ipStart);
+            ip_address[ipEnd - ipStart] = '\0';
+            
+        } }
+
+    //sscanf((char *)wifi_dataBuffer, "%*IPDOMAIN:%15[^\r\n]", ip_address);
+
+    //sscanf(wifi_dataBuffer, "+CIPDOMAIN:%15[^\r\n]", ip_address)
+    //strcpy(ip_address, wifi_dataBuffer);
+
+   // for (int i = 0; i < 50; i++)
+    //{
+   //     ip_address[i] =wifi_dataBuffer[i];
+   // }
+    
+
+
+
+    wifi_clear_databuffer_and_index();
+    uart_init(USART_WIFI, wifi_baudrate, callback_state);
+    return error; 
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+WIFI_ERROR_MESSAGE_t wifi_command_quit_AP(){
+
+    return wifi_command("AT+CWQAP", 5);
+}
+
+WIFI_ERROR_MESSAGE_t wifi_command_set_mode_to_1()
+{
+    return wifi_command("AT+CWMODE=1", 1);
+}
+
+WIFI_ERROR_MESSAGE_t wifi_command_set_to_single_Connection()
+{
+    return wifi_command("AT+CIPMUX=0", 1);
+}
+
+WIFI_ERROR_MESSAGE_t wifi_command_close_TCP_connection()
+{
+    return wifi_command("AT+CIPCLOSE", 5);
+}
+
+
+
+#define BUF_SIZE 128
+#define IPD_PREFIX "+IPD,"
+#define PREFIX_LENGTH 5
+
+WIFI_TCP_Callback_t callback_when_message_received_static;
+char *received_message_buffer_static_pointer;
+void static wifi_TCP_callback(uint8_t byte)
+{
+    static enum { IDLE, MATCH_PREFIX, LENGTH, DATA } state = IDLE;
+    static int length = 0, index = 0, prefix_index = 0;
+
+    switch(state) {
+        case IDLE:
+            if(byte == IPD_PREFIX[0]) {
+                state = MATCH_PREFIX;
+                prefix_index = 1;
+            }
+            break;
+
+        case MATCH_PREFIX:
+            if(byte == IPD_PREFIX[prefix_index]) {
+                if(prefix_index == PREFIX_LENGTH - 1) {
+                    state = LENGTH;
+                } else {
+                    prefix_index++;
+                }
+            } else {
+                // not the expected character, reset to IDLE
+                state = IDLE;
+                prefix_index = 0;
+            }
+            break;
+
+        case LENGTH:
+            if(byte >= '0' && byte <= '9') {
+                length = length * 10 + (byte - '0');
+            } else if(byte == ':') {
+                state = DATA;
+                index = 0; // reset index to start storing data
+            } else {
+                // not the expected character, reset to IDLE
+                state = IDLE;
+                length = 0;
+            }
+            break;
+
+        case DATA:
+            if(index < length) {
+                received_message_buffer_static_pointer[index++] = byte;
+            }
+            if(index == length) {
+                // message is complete, null terminate the string
+                received_message_buffer_static_pointer[index] = '\0';
+
+                // reset to IDLE
+                state = IDLE;
+                length = 0;
+                index = 0;
+
+            wifi_clear_databuffer_and_index();
+            callback_when_message_received_static();
+            }
+            break;
+    }
+  
+}
+
+WIFI_ERROR_MESSAGE_t wifi_command_create_TCP_connection(char *IP, uint16_t port, WIFI_TCP_Callback_t callback_when_message_received, char *received_message_buffer)
+{
+    received_message_buffer_static_pointer = received_message_buffer;
+    callback_when_message_received_static = callback_when_message_received;
+    char sendbuffer[128];
+    char portString[7];
+
+    strcpy(sendbuffer, "AT+CIPSTART=\"TCP\",\"");
+    
+    strcat(sendbuffer, IP);
+    strcat(sendbuffer, "\",");
+    sprintf(portString, "%u", port);
+    strcat(sendbuffer, portString);
+
+    WIFI_ERROR_MESSAGE_t errorMessage = wifi_command(sendbuffer, 20);
+    if (errorMessage != WIFI_OK)
+        return errorMessage;
+    else
+        uart_init(USART_WIFI, wifi_baudrate, wifi_TCP_callback);
+
+    wifi_clear_databuffer_and_index();
+    return errorMessage;
+}
+
+WIFI_ERROR_MESSAGE_t wifi_command_TCP_transmit(uint8_t * data, uint16_t length){
+    char sendbuffer[128];
+    char portString[7];
+    strcpy(sendbuffer, "AT+CIPSEND=");
+    sprintf(portString, "%u", length);
+    strcat(sendbuffer, portString);
+
+    WIFI_ERROR_MESSAGE_t errorMessage = wifi_command(sendbuffer, 20);
+    if (errorMessage != WIFI_OK)
+        return errorMessage;
+    
+uart_send_array_blocking(USART_WIFI, data,  length);
+return WIFI_OK;
 }
