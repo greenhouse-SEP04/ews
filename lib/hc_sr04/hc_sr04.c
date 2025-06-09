@@ -11,8 +11,8 @@
 
 /* ----------- dummy registers -------------------------------------------- */
 uint8_t DDRL, PORTL, PINL;
-uint8_t TCCR1B;           /* 8-bit timer-1 control register               */
-uint16_t TCNT1;           /* 16-bit timer-1 counter                       */
+uint8_t TCCR1B;           /* 8-bit Timer-1 control register               */
+uint8_t TCNT1;            /* 8-bit counter to match mock_avr_io.h         */
 
 /* ----------- delay stubs ------------------------------------------------ */
 void _delay_us(int us) { (void)us; }
