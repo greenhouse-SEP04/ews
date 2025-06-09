@@ -1,53 +1,59 @@
 #include "pir.h"
 #include "includes.h"
 
+/* -------------------------------------------------------------------------- */
+/*  Desktop-test support: when we are NOT compiling for AVR, we need to       */
+/*  *define* the AVR-style registers that the driver touches.  The mock       */
+/*  header only declares them as extern.                                      */
+#if !defined(__AVR__)      /* i.e. Windows/native unit-test build */
+#include "mock_avr_io.h"
 
-//signal
-#define DDR_sig DDRD
-#define P_sig PD2
-#define PORT_sig PORTD
-#define PIN_sig PIND
+/* ---- GPIO & interrupt registers ---------------------------------------- */
+uint8_t DDRD, PORTD, PIND;
+uint8_t EICRA, EIMSK;
+
+/*  The test file already supplies a stub for sei(), so we don’t define it   */
+#endif
+/* -------------------------------------------------------------------------- */
 
 
-
+/* ---------------- Pin / register aliases --------------------------------- */
+#define DDR_sig   DDRD
+#define P_sig     PD2
+#define PORT_sig  PORTD
+#define PIN_sig   PIND
 
 static pir_callback_t pir_callback = NULL;
 
-#ifndef WINDOWS_TEST
-ISR(INT2_vect) {
-    
-    
-    pir_callback();
 
-    /*
-    // Check if PK4 changed state
-    if (PIN_sig & (1 << P_sig)) {
-        // High: Motion detected
-        if (pir_callback) {
-            
-        }
-    } else {
-        // Low: No motion
-        // You can also call a different callback here if needed
-    }*/
+/* ---------------- ISR definitions ---------------------------------------- */
+/*  In the production build we use the real AVR ISR syntax.  In the Windows  */
+/*  build we compile a normal function so the unit test can call it.         */
+#if defined(__AVR__)
+ISR(INT2_vect)
+{
+    if (pir_callback) pir_callback();
+}
+#else
+void INT2_vect(void)
+{
+    if (pir_callback) pir_callback();
 }
 #endif
 
-void pir_init(pir_callback_t callback) {
 
+/* ---------------- Driver init ------------------------------------------- */
+void pir_init(pir_callback_t callback)
+{
+    /* Configure PD2 as input with pull-up                                   */
+    DDR_sig  &= ~(1 << P_sig);
+    PORT_sig |=  (1 << P_sig);
 
+    /* Trigger INT2 on both edges (ISC21:20 = 11)                            */
+    EICRA |= (1 << ISC21) | (1 << ISC20);
+    EIMSK |= (1 << INT2);                 /* Enable external interrupt      */
 
-//Set PK4 as input and enable pullupresistor
-    DDR_sig &= ~(1 << P_sig);
-    PORT_sig |= (1 << P_sig);
-
-    // Enable pin change interrupt on PCINT20 (PK4)
-    EICRA |= (1 << ISC20) | (1 << ISC21);  // Set INT2 to trigger on rising edge
-    EIMSK |= (1 << INT2);  // Enable external interrupt INT2
-
-    // Set the callback
     pir_callback = callback;
 
-    // Enable global interrupts
-    sei();
+    sei();                                /* Enable global interrupts       */
 }
