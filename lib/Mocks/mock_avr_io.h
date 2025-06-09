@@ -7,6 +7,7 @@
 
 #pragma once
 #include <stdint.h>
+#include <string.h>
 
 void cli(void);
 void sei(void);
