@@ -1,5 +1,6 @@
 /*********************************************************************
  *  Smart Greenhouse – full firmware (SEP4 drivers, dynamic settings)
+ *  TOKEN-EXPIRY SAFE (2025-06-10)
  *********************************************************************/
 
 #define F_CPU 16000000UL
@@ -106,7 +107,7 @@ static void dbg(const char *fmt, ...)
 }
 
 /* ------------------------------------------------------------------------ */
-/*  HTTP POST helper (returns body in rxbuf)                                */
+/*  Simple (unauthenticated) HTTP-POST – kept for login/registration        */
 /* ------------------------------------------------------------------------ */
 static bool http_post(const char *path,const char *body,char *rxbuf,size_t rxlen)
 {
@@ -126,6 +127,93 @@ static bool http_post(const char *path,const char *body,char *rxbuf,size_t rxlen
     char *b=strstr(rxbuf,"\r\n\r\n"); if(!b) return false;
     memmove(rxbuf,b+4,strlen(b+4)+1);
     return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Authenticated helpers – return HTTP status for retry logic              */
+/* ------------------------------------------------------------------------ */
+static int http_post_auth(const char *path_with_q,
+                          const char *body,
+                          char *rxbuf,
+                          size_t rxlen)
+{
+    /* Resolve host → IP */
+    char ip[32]="";
+    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return -1;
+    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return -1;
+
+    int blen = body ? strlen(body) : 0;
+    int hlen = snprintf(txbuf,sizeof(txbuf),
+        "POST %s HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "Authorization: %s\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n\r\n",
+        path_with_q, API_HOST, g_auth_token, blen);
+    wifi_command_TCP_transmit((uint8_t*)txbuf, hlen);
+    if (body && blen) wifi_command_TCP_transmit((uint8_t*)body, blen);
+    _delay_ms(500);
+    wifi_command_close_TCP_connection();
+
+    /* Parse status line, keep body */
+    char *line = strstr(rxbuf, "HTTP/");
+    int status = 0;
+    if (line) sscanf(line, "HTTP/%*s %d", &status);
+    char *b = strstr(rxbuf, "\r\n\r\n");
+    if (b) memmove(rxbuf, b + 4, strlen(b + 4) + 1);
+    else   rxbuf[0] = '\0';
+    return status;
+}
+
+static int http_get_auth(const char *path_with_q,
+                         char *rxbuf,
+                         size_t rxlen)
+{
+    char ip[32]="";
+    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return -1;
+    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return -1;
+
+    int hlen = snprintf(txbuf,sizeof(txbuf),
+        "GET %s HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "Authorization: %s\r\n"
+        "Connection: close\r\n\r\n",
+        path_with_q, API_HOST, g_auth_token);
+    wifi_command_TCP_transmit((uint8_t*)txbuf, hlen);
+    _delay_ms(500);
+    wifi_command_close_TCP_connection();
+
+    int status = 0;
+    char *line = strstr(rxbuf, "HTTP/");
+    if (line) sscanf(line, "HTTP/%*s %d", &status);
+    char *b = strstr(rxbuf, "\r\n\r\n");
+    if (b) memmove(rxbuf, b + 4, strlen(b + 4) + 1);
+    else   rxbuf[0] = '\0';
+    return status;
+}
+
+/* Retry wrapper (one retry max) */
+static int post_with_retry(const char *path_with_q,
+                           const char *body)
+{
+    int s = http_post_auth(path_with_q, body, rxbuf, sizeof(rxbuf));
+    if (s==401 || s==403) {
+        dbg("TOKEN expired – re-auth…\n");
+        authenticate_device();
+        s = http_post_auth(path_with_q, body, rxbuf, sizeof(rxbuf));
+    }
+    return s;
+}
+
+static int get_with_retry(const char *path_with_q)
+{
+    int s = http_get_auth(path_with_q, rxbuf, sizeof(rxbuf));
+    if (s==401 || s==403) {
+        dbg("TOKEN expired – re-auth…\n");
+        authenticate_device();
+        s = http_get_auth(path_with_q, rxbuf, sizeof(rxbuf));
+    }
+    return s;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -181,19 +269,14 @@ static void cfg_parse_json(const char *js)
 
 static void fetch_settings(void)
 {
-    char ip[32]="";
-    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return;
-    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return;
+    char path[64];
+    snprintf(path,sizeof(path),"%s?dev=%s", SETTINGS_EP, device_mac);
 
-    snprintf(txbuf,sizeof(txbuf),
-        "GET %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
-        "Connection: close\r\n\r\n",
-        SETTINGS_EP,device_mac,API_HOST,g_auth_token);
-    wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
-    wifi_command_close_TCP_connection();
+    int status = get_with_retry(path);
+    if (status<200 || status>=300) { dbg("SETTINGS: HTTP %d\n",status); return; }
 
-    char *body=strstr(rxbuf,"\r\n\r\n");
-    if(body){ cfg_parse_json(body+4); cfg_save(); }
+    cfg_parse_json(rxbuf);
+    cfg_save();
     memset(rxbuf,0,sizeof(rxbuf));
 }
 
@@ -252,36 +335,39 @@ static void pir_cb(void){ S_motion=true; }
 /* ====== TELEMETRY & COMMANDS (60 s) ==================================== */
 static void task_cloud_60s(void)
 {
-    char ts[32]; clock_to_string(&clk,ts,sizeof(ts));
+    char ts[32];
+    clock_to_string(&clk, ts, sizeof(ts));
 
-    /* pump / bulb removed */
-    snprintf(json,sizeof(json),
+    /* Build JSON (motion flag already latched per 5 s) */
+    snprintf(json, sizeof(json),
         "{\"ts\":\"%s\",\"temp\":%d,\"hum\":%d,\"soil\":%d,"
-        "\"lux\":%u,\"lvl\":%u}",
-        ts,S_temp,S_hum,S_soil,S_lux,S_lvl_cm);
+        "\"lux\":%u,\"lvl\":%u,\"motion\":%s}",
+        ts, S_temp, S_hum, S_soil, S_lux, S_lvl_cm,
+        S_motion ? "true" : "false");
 
-    char ip[32]="";
-    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return;
-    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return;
+    /* Clear motion latch so we only report once per minute */
+    S_motion = false;
 
-    /* POST telemetry */
-    snprintf(txbuf,sizeof(txbuf),
-        "POST %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
-        "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
-        TELEMETRY_EP,device_mac,API_HOST,g_auth_token,
-        (int)strlen(json),json);
-    wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
+    /* --- POST telemetry ------------------------------------------------ */
+    char path[64];
+    snprintf(path,sizeof(path),"%s?dev=%s", TELEMETRY_EP, device_mac);
 
-    /* GET ML command */
-    snprintf(txbuf,sizeof(txbuf),
-        "GET %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n\r\n",
-        COMMAND_EP,device_mac,API_HOST,g_auth_token);
-    wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
+    int status = post_with_retry(path, json);
+    if (status<200 || status>=300) {
+        dbg("TELEMETRY: HTTP %d\n",status);
+        memset(rxbuf,0,sizeof(rxbuf));
+        return;
+    }
 
-    wifi_command_close_TCP_connection();
-
-    if(strstr(rxbuf,"WATER:ON")){A_pump=false;S_soil=0;}
-    if(strstr(rxbuf,"FERT:ON")) A_fert_done=false;
+    /* --- GET pending commands ----------------------------------------- */
+    snprintf(path,sizeof(path),"%s?dev=%s", COMMAND_EP, device_mac);
+    status = get_with_retry(path);
+    if (status>=200 && status<300) {
+        if (strstr(rxbuf, "WATER:ON")) { A_pump = false; S_soil = 0; }
+        if (strstr(rxbuf, "FERT:ON"))  A_fert_done = false;
+    } else {
+        dbg("COMMANDS: HTTP %d\n",status);
+    }
     memset(rxbuf,0,sizeof(rxbuf));
 }
 
