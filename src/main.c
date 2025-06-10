@@ -1,3 +1,7 @@
+/*********************************************************************
+ *  Smart Greenhouse – full firmware (SEP4 drivers, dynamic settings)
+ *********************************************************************/
+
 #define F_CPU 16000000UL
 #include <avr/io.h>
 #include <util/delay.h>
@@ -14,7 +18,7 @@
 #define WIFI_PASS            "YOUR-PASS"
 #define API_HOST             "api.example.com"
 #define API_PORT             443
-#define CFG_USE_EEPROM       1   /* 0 = RAM-only */
+#define CFG_USE_EEPROM       1           /* 0 = RAM-only          */
 /* ---------------------------------------------------------------- */
 
 #include "pc_comm.h"
@@ -68,15 +72,15 @@ static volatile gh_cfg_t CFG = {
 /* ---------- EEPROM persistence (optional) ------------------------------ */
 #if CFG_USE_EEPROM
 EEMEM static gh_cfg_t ee_cfg;
-static void cfg_load(void) { eeprom_read_block((void*)&CFG, &ee_cfg, sizeof(CFG)); }
-static void cfg_save(void) { eeprom_update_block((const void*)&CFG, &ee_cfg, sizeof(CFG)); }
+static void cfg_load(void){ eeprom_read_block((void*)&CFG,&ee_cfg,sizeof(CFG)); }
+static void cfg_save(void){ eeprom_update_block((const void*)&CFG,&ee_cfg,sizeof(CFG)); }
 #else
 #define cfg_load()
 #define cfg_save()
 #endif
 
 /* ====== GLOBAL STATE ==================================================== */
-static volatile Clock clk;    /* updated once per second */
+static volatile Clock clk;
 
 volatile uint8_t  S_temp=0, S_hum=0, S_soil=0;
 volatile uint16_t S_lux=0, S_lvl_cm=0;
@@ -89,99 +93,78 @@ volatile uint32_t hours_since_fert=0;
 /* I/O buffers */
 static char txbuf[512], rxbuf[256], json[384];
 
-/* These hold at runtime: */
-static char device_mac[18]    = {0};  /* "AA:BB:CC:DD:EE:FF" */
-static char g_auth_token[128] = {0};  /* "Bearer xxxx..."   */
+/* runtime identities */
+static char device_mac[18]    = {0};   /* "AA:BB:CC:DD:EE:FF" */
+static char g_auth_token[128] = {0};   /* "Bearer …"          */
 
 /* ====== HELPERS ========================================================= */
-static void dbg(const char *fmt, ...) {
+static void dbg(const char *fmt, ...)
+{
     char b[128];
-    va_list ap; va_start(ap, fmt); vsnprintf(b,sizeof(b),fmt,ap); va_end(ap);
+    va_list ap; va_start(ap,fmt); vsnprintf(b,sizeof(b),fmt,ap); va_end(ap);
     pc_comm_send_string_blocking(b);
 }
 
 /* ------------------------------------------------------------------------ */
-/*  HTTP-style POST helper (strips headers, returns body in rxbuf)          */
+/*  HTTP POST helper (returns body in rxbuf)                                */
 /* ------------------------------------------------------------------------ */
-static bool http_post(const char *path, const char *body, char *rxbuf, size_t rxlen) {
-    char ip[32]={0};
-    if (wifi_command_get_ip_from_URL(API_HOST, ip) != WIFI_OK) return false;
-    if (wifi_command_create_TCP_connection(ip, API_PORT, NULL, rxbuf) != WIFI_OK) return false;
+static bool http_post(const char *path,const char *body,char *rxbuf,size_t rxlen)
+{
+    char ip[32]="";
+    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return false;
+    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return false;
 
-    /* build and send headers */
-    int blen = strlen(body);
-    int hlen = snprintf(txbuf,sizeof(txbuf),
-        "POST %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Length: %d\r\n\r\n",
-        path, API_HOST, blen
-    );
-    wifi_command_TCP_transmit((uint8_t*)txbuf, hlen);
-    wifi_command_TCP_transmit((uint8_t*)body, blen);
-
+    int blen=strlen(body);
+    int hlen=snprintf(txbuf,sizeof(txbuf),
+        "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
+        "Content-Length: %d\r\n\r\n", path,API_HOST,blen);
+    wifi_command_TCP_transmit((uint8_t*)txbuf,hlen);
+    wifi_command_TCP_transmit((uint8_t*)body,blen);
     _delay_ms(500);
     wifi_command_close_TCP_connection();
 
-    /* strip HTTP headers */
-    char *b = strstr(rxbuf, "\r\n\r\n");
-    if (!b) return false;
-    memmove(rxbuf, b+4, strlen(b+4)+1);
+    char *b=strstr(rxbuf,"\r\n\r\n"); if(!b) return false;
+    memmove(rxbuf,b+4,strlen(b+4)+1);
     return true;
 }
 
 /* ------------------------------------------------------------------------ */
-/*  LOGIN / REGISTER using MAC as username, “worker” as password            */
-/*  Stores resulting “Bearer <token>” in g_auth_token[]                     */
+/*  Authenticate with MAC + “worker”                                        */
 /* ------------------------------------------------------------------------ */
-static void authenticate_device(void) {
+static void authenticate_device(void)
+{
     char payload[64];
+    snprintf(payload,sizeof(payload),
+             "{\"username\":\"%s\",\"password\":\"worker\"}",device_mac);
 
-    /* try login */
-    snprintf(payload, sizeof(payload),
-             "{\"username\":\"%s\",\"password\":\"worker\"}",
-             device_mac);
+    if (http_post(DEVICE_LOGIN_EP,payload,rxbuf,sizeof(rxbuf))) {
+        char *p=strstr(rxbuf,"\"token\":\"");
+        if(p){ p+=9; char *q=strchr(p,'"');
+            if(q&&(q-p)<(int)(sizeof(g_auth_token)-8)){
+                snprintf(g_auth_token,sizeof(g_auth_token),
+                         "Bearer %.*s",(int)(q-p),p);
+                dbg("AUTH: login ok\n"); return;}}}
 
-    if (http_post(DEVICE_LOGIN_EP, payload, rxbuf, sizeof(rxbuf))) {
-        char *p = strstr(rxbuf, "\"token\":\"");
-        if (p) {
-            p += 9;
-            char *q = strchr(p, '"');
-            if (q && (q-p) < (int)(sizeof(g_auth_token)-8)) {
-                snprintf(g_auth_token, sizeof(g_auth_token),
-                         "Bearer %.*s", (int)(q-p), p);
-                dbg("AUTH: login ok\n");
-                return;
-            }
-        }
-    }
-
-    /* otherwise register */
     memset(rxbuf,0,sizeof(rxbuf));
-    if (http_post(DEVICE_REGISTER_EP, payload, rxbuf, sizeof(rxbuf))) {
-        char *p = strstr(rxbuf, "\"token\":\"");
-        if (p) {
-            p += 9;
-            char *q = strchr(p, '"');
-            if (q && (q-p) < (int)(sizeof(g_auth_token)-8)) {
-                snprintf(g_auth_token, sizeof(g_auth_token),
-                         "Bearer %.*s", (int)(q-p), p);
-                dbg("AUTH: registered ok\n");
-                return;
-            }
-        }
-    }
+    if (http_post(DEVICE_REGISTER_EP,payload,rxbuf,sizeof(rxbuf))) {
+        char *p=strstr(rxbuf,"\"token\":\"");
+        if(p){ p+=9; char *q=strchr(p,'"');
+            if(q&&(q-p)<(int)(sizeof(g_auth_token)-8)){
+                snprintf(g_auth_token,sizeof(g_auth_token),
+                         "Bearer %.*s",(int)(q-p),p);
+                dbg("AUTH: registered ok\n"); return;}}}
 
     dbg("AUTH: failed\n");
 }
 
 /* ------------------------------------------------------------------------ */
-/*  SETTINGS FETCH + PARSER (super-lightweight)                             */
+/*  CONFIG fetch / parse                                                    */
 /* ------------------------------------------------------------------------ */
-static void cfg_parse_json(const char *js) {
+static void cfg_parse_json(const char *js)
+{
     char *p;
     if ((p=strstr(js,"\"watering\""))) {
-        CFG.watering_manual = strstr(p,"\"manual\"") != NULL;
+        CFG.watering_manual = strstr(p,"\"manual\"")!=NULL;
         if ((p=strstr(p,"soilMin"))) CFG.soil_min = atoi(p+8);
         if ((p=strstr(p,"soilMax"))) CFG.soil_max = atoi(p+8);
     }
@@ -189,202 +172,158 @@ static void cfg_parse_json(const char *js) {
         CFG.fert_hours = atoi(p+6);
 
     if ((p=strstr(js,"\"lighting\""))) {
-        CFG.lighting_manual = strstr(p,"\"manual\"") != NULL;
+        CFG.lighting_manual = strstr(p,"\"manual\"")!=NULL;
         if ((p=strstr(p,"luxLow"))) CFG.lux_low = atoi(p+7);
-        if ((p=strstr(p,"\"on\"")))  CFG.on_h    = atoi(p+4);
-        if ((p=strstr(p,"\"off\""))) CFG.off_h   = atoi(p+5);
+        if ((p=strstr(p,"\"on\"")))  CFG.on_h  = atoi(p+4);
+        if ((p=strstr(p,"\"off\""))) CFG.off_h = atoi(p+5);
     }
 }
 
-static void fetch_settings(void) {
-    char ip[32]={0};
-    if (wifi_command_get_ip_from_URL(API_HOST, ip) != WIFI_OK) return;
-    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf) != WIFI_OK) return;
+static void fetch_settings(void)
+{
+    char ip[32]="";
+    if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return;
+    if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return;
 
     snprintf(txbuf,sizeof(txbuf),
-        "GET %s?dev=%s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Authorization: %s\r\n"
+        "GET %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
         "Connection: close\r\n\r\n",
-        SETTINGS_EP, device_mac, API_HOST, g_auth_token
-    );
+        SETTINGS_EP,device_mac,API_HOST,g_auth_token);
     wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
     wifi_command_close_TCP_connection();
 
-    char *body = strstr(rxbuf,"\r\n\r\n");
-    if (body) { cfg_parse_json(body+4); cfg_save(); }
+    char *body=strstr(rxbuf,"\r\n\r\n");
+    if(body){ cfg_parse_json(body+4); cfg_save(); }
     memset(rxbuf,0,sizeof(rxbuf));
 }
 
-/* ====== SENSOR + LOGIC TASKS =========================================== */
-static void task_tick_1s(void) {
+/* ====== TASKS =========================================================== */
+static void task_tick_1s(void)
+{
     clock_tick(&clk);
-    static bool hb; hb = !hb;
-    hb ? leds_turnOn(4) : leds_turnOff(4);
+    static bool hb; hb=!hb; hb?leds_turnOn(4):leds_turnOff(4);
     display_int(clk.second);
 }
 
-static void task_sample_5s(void) {
+static void task_sample_5s(void)
+{
     uint8_t d;
     dht11_get(&S_hum,&d,&S_temp,&d);
     S_soil   = soil_read();
     S_lux    = light_read();
     S_lvl_cm = hc_sr04_takeMeasurement();
     adxl345_read_xyz(&S_ax,&S_ay,&S_az);
-
-    if (abs(S_ax)>800 || abs(S_ay)>800 || abs(S_az-1024)>800)
-        S_tamper = true;
+    if(abs(S_ax)>800||abs(S_ay)>800||abs(S_az-1024)>800) S_tamper=true;
 }
 
-static inline bool within_window(uint8_t h,uint8_t on,uint8_t off) {
-    return (h>=on) || (h<off);
-}
+static inline bool within_window(uint8_t h,uint8_t on,uint8_t off)
+{ return (h>=on)||(h<off); }
 
-static void task_logic_5s(void) {
-    /* WATERING */
-    if (!CFG.watering_manual) {
-        if (!A_pump && S_soil < CFG.soil_min && S_lvl_cm>5) {
-            A_pump=true; pump_on(); leds_turnOn(1);
-        }
-        if (A_pump && S_soil > CFG.soil_max) {
-            A_pump=false; pump_off(); leds_turnOff(1);
-        }
+static void task_logic_5s(void)
+{
+    if(!CFG.watering_manual){
+        if(!A_pump&&S_soil<CFG.soil_min&&S_lvl_cm>5){
+            A_pump=true; pump_on(); leds_turnOn(1);}
+        if(A_pump&&S_soil>CFG.soil_max){
+            A_pump=false; pump_off(); leds_turnOff(1);}
     }
 
-    /* LIGHTING */
-    uint8_t h = clk.hour;
-    if (!CFG.lighting_manual) {
-        bool dark = S_lux < CFG.lux_low;
-        if (dark && within_window(h,CFG.on_h,CFG.off_h) && !A_light) {
-            lightbulb_on(); A_light=true; leds_turnOn(2);
-        }
-        if ((!dark || !within_window(h,CFG.on_h,CFG.off_h)) && A_light) {
-            lightbulb_off(); A_light=false; leds_turnOff(2);
-        }
+    uint8_t h=clk.hour;
+    if(!CFG.lighting_manual){
+        bool dark=S_lux<CFG.lux_low;
+        if(dark&&within_window(h,CFG.on_h,CFG.off_h)&&!A_light){
+            lightbulb_on();A_light=true;leds_turnOn(2);}
+        if((!dark||!within_window(h,CFG.on_h,CFG.off_h))&&A_light){
+            lightbulb_off();A_light=false;leds_turnOff(2);}
     }
 
-    /* FERTILISER */
-    if (!A_fert_done && hours_since_fert>=CFG.fert_hours) {
-        servo(90); _delay_ms(600); servo(0);
-        A_fert_done=true; hours_since_fert=0;
+    if(!A_fert_done&&hours_since_fert>=CFG.fert_hours){
+        servo(90);_delay_ms(600);servo(0);
+        A_fert_done=true;hours_since_fert=0;
     }
 
-    /* MOTION & TAMPER */
-    if (S_motion && (h>=22||h<6)) {
-        for(uint8_t i=0;i<6;i++) {
-            leds_toggle(3); buzzer_beep(); _delay_ms(120);
-        }
-    }
-    if (S_tamper) {
-        buzzer_beep(); leds_turnOn(3);
-    }
-    S_motion = false;
+    if(S_motion&&(h>=22||h<6))
+        for(uint8_t i=0;i<6;i++){leds_toggle(3);buzzer_beep();_delay_ms(120);}
+    if(S_tamper){buzzer_beep();leds_turnOn(3);}
+    S_motion=false;
 }
 static void pir_cb(void){ S_motion=true; }
 
-/* ====== TELEMETRY & COMMANDS (every 60s) ============================== */
-static void task_cloud_60s(void) {
-    char ts[32];
-    clock_to_string(&clk,ts,sizeof(ts));
+/* ====== TELEMETRY & COMMANDS (60 s) ==================================== */
+static void task_cloud_60s(void)
+{
+    char ts[32]; clock_to_string(&clk,ts,sizeof(ts));
+
+    /* pump / bulb removed */
     snprintf(json,sizeof(json),
         "{\"ts\":\"%s\",\"temp\":%d,\"hum\":%d,\"soil\":%d,"
-        "\"lux\":%u,\"lvl\":%u,\"pump\":%d,\"bulb\":%d}",
-        ts, S_temp, S_hum, S_soil, S_lux, S_lvl_cm, A_pump, A_light
-    );
+        "\"lux\":%u,\"lvl\":%u}",
+        ts,S_temp,S_hum,S_soil,S_lux,S_lvl_cm);
 
-    char ip[32]={0};
+    char ip[32]="";
     if (wifi_command_get_ip_from_URL(API_HOST,ip)!=WIFI_OK) return;
     if (wifi_command_create_TCP_connection(ip,API_PORT,NULL,rxbuf)!=WIFI_OK) return;
 
     /* POST telemetry */
     snprintf(txbuf,sizeof(txbuf),
-        "POST %s?dev=%s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Authorization: %s\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Length: %d\r\n\r\n%s",
-        TELEMETRY_EP, device_mac, API_HOST, g_auth_token,
-        (int)strlen(json), json
-    );
+        "POST %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n"
+        "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+        TELEMETRY_EP,device_mac,API_HOST,g_auth_token,
+        (int)strlen(json),json);
     wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
 
-    /* GET one-shot ML command */
+    /* GET ML command */
     snprintf(txbuf,sizeof(txbuf),
-        "GET %s?dev=%s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Authorization: %s\r\n\r\n",
-        COMMAND_EP, device_mac, API_HOST, g_auth_token
-    );
+        "GET %s?dev=%s HTTP/1.1\r\nHost: %s\r\nAuthorization: %s\r\n\r\n",
+        COMMAND_EP,device_mac,API_HOST,g_auth_token);
     wifi_command_TCP_transmit((uint8_t*)txbuf,strlen(txbuf));
 
     wifi_command_close_TCP_connection();
 
-    if (strstr(rxbuf,"WATER:ON")) { A_pump=false; S_soil=0; }
-    if (strstr(rxbuf,"FERT:ON"))  { A_fert_done=false; }
+    if(strstr(rxbuf,"WATER:ON")){A_pump=false;S_soil=0;}
+    if(strstr(rxbuf,"FERT:ON")) A_fert_done=false;
     memset(rxbuf,0,sizeof(rxbuf));
 }
 
-/* ====== INIT ============================================================== */
-static void init_all(void) {
-    pc_comm_init(115200,NULL);
-    cfg_load();
+/* ====== INIT =========================================================== */
+static void init_all(void)
+{
+    pc_comm_init(115200,NULL); cfg_load();
 
-    /* HW blocks */
     buttons_init(); leds_init(); display_init(); buzzer_beep();
     dht11_init(); soil_init(); light_init();
-    hc_sr04_init(); adxl345_init();
-    pir_init(pir_cb);
+    hc_sr04_init(); adxl345_init(); pir_init(pir_cb);
     pump_init(); servo(0); lightbulb_init(); tone_init();
-
-    /* clock to a known time */
     clock_init(&clk,2025,6,10,12,0,0);
 
-    /* bring up Wi-Fi */
-    wifi_init();
-    wifi_command_disable_echo();
-    wifi_command_set_mode_to_1();
-    wifi_command_set_to_single_Connection();
-    wifi_command_join_AP(WIFI_SSID, WIFI_PASS);
-    _delay_ms(500);
+    wifi_init(); wifi_command_disable_echo();
+    wifi_command_set_mode_to_1(); wifi_command_set_to_single_Connection();
+    wifi_command_join_AP(WIFI_SSID,WIFI_PASS); _delay_ms(500);
 
-    /* fetch our MAC once and store it */
-    if (wifi_command_get_MAC(device_mac) == WIFI_OK) {
-        dbg("MAC: %s\n", device_mac);
-    } else {
-        dbg("MAC: ERR\n");
-        strcpy(device_mac,"UNKNOWN");
-    }
+    if(wifi_command_get_MAC(device_mac)==WIFI_OK) dbg("MAC: %s\n",device_mac);
+    else{ dbg("MAC: ERR\n"); strcpy(device_mac,"UNKNOWN"); }
 
-    /* authenticate (login→register) */
     authenticate_device();
-
     tone_play_starwars();
-
-    /* initial settings pull */
     fetch_settings();
 }
 
-/* ====== TASK START ======================================================= */
-static void start_tasks(void) {
-    periodic_task_init_a(task_tick_1s,    1000);
-    periodic_task_init_b(task_sample_5s,  5000);
-    periodic_task_init_c(task_logic_5s,   5000);
-    periodic_task_init_d(task_cloud_60s, 60000);
+/* ====== TASK SCHEDULER ================================================== */
+static void start_tasks(void)
+{
+    periodic_task_init_a(task_tick_1s,   1000);
+    periodic_task_init_b(task_sample_5s, 5000);
+    periodic_task_init_c(task_logic_5s,  5000);
+    periodic_task_init_d(task_cloud_60s,60000);
     periodic_task_init_d(fetch_settings,3600000);
 }
 
-/* ====== MAIN ============================================================= */
-int main(void) {
-    init_all();
-    start_tasks();
-    sei();
-
-    for(;;) {
+/* ====== MAIN =========================================================== */
+int main(void)
+{
+    init_all(); start_tasks(); sei();
+    for(;;){
         poll_buttons();
-        if (A_pump && S_lvl_cm<=5) {
-            pump_off();
-            A_pump=false;
-            buzzer_beep();
-        }
+        if(A_pump&&S_lvl_cm<=5){pump_off();A_pump=false;buzzer_beep();}
     }
 }
