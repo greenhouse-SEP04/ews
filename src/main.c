@@ -26,11 +26,11 @@
 #define WIFI_SSID   "YOUR-SSID"
 #define WIFI_PASS   "YOUR-PASS"
 
-#define API_HOST    "api.example.com"
+#define API_HOST    "api.com"
 #define API_PORT    443
 
 /* ML predictor (GET) */
-#define PREDICT_HOST "soilmoist.com"
+#define PREDICT_HOST "mal.com"
 #define PREDICT_PORT 443
 #define PREDICT_EP   "/v1/predict"
 
